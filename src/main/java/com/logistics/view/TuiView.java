@@ -10,18 +10,16 @@ import com.googlecode.lanterna.terminal.DefaultTerminalFactory;
 import com.googlecode.lanterna.terminal.Terminal;
 import com.logistics.controller.LogisticsController;
 import com.logistics.model.Delivery;
+import com.logistics.model.Driver;
 
 import java.io.IOException;
 import java.util.List;
 
-/**
- * View layer for Project 1.
- * Implements high-visibility UI and interactive delivery management.
- */
 public class TuiView {
     private Screen screen;
-    private String inputBuffer = "";
     private int selectedIndex = 0;
+    private enum ViewMode { DELIVERIES, DRIVERS }
+    private ViewMode currentMode = ViewMode.DELIVERIES;
 
     public void start() throws IOException {
         Terminal terminal = new DefaultTerminalFactory().createTerminal();
@@ -29,152 +27,116 @@ public class TuiView {
         screen.startScreen();
     }
 
-    /**
-     * Main event loop for the interface.
-     * Handles navigation, status toggling, and input triggers.
-     */
     public void interactionLoop(LogisticsController controller) throws IOException {
         boolean keepRunning = true;
-
         while (keepRunning) {
-            render(controller.getAllDeliveries());
+            render(controller);
             KeyStroke key = screen.readInput();
 
-            // 1. EXIT LOGIC
             if (key.getKeyType() == KeyType.Escape || (key.getKeyType() == KeyType.Character && key.getCharacter() == 'q')) {
                 keepRunning = false;
-            }
-
-            // 2. NAVIGATION LOGIC (Up/Down)
-            else if (key.getKeyType() == KeyType.ArrowDown) {
-                if (selectedIndex < controller.getAllDeliveries().size() - 1) {
-                    selectedIndex++;
-                }
+            } else if (key.getKeyType() == KeyType.Character && key.getCharacter() == 'm') {
+                currentMode = (currentMode == ViewMode.DELIVERIES) ? ViewMode.DRIVERS : ViewMode.DELIVERIES;
+                selectedIndex = 0;
+            } else if (key.getKeyType() == KeyType.ArrowDown) {
+                int max = (currentMode == ViewMode.DELIVERIES) ? controller.getAllDeliveries().size() : controller.getAllDrivers().size();
+                if (selectedIndex < max - 1) selectedIndex++;
             } else if (key.getKeyType() == KeyType.ArrowUp) {
-                if (selectedIndex > 0) {
-                    selectedIndex--;
-                }
-            }
-
-            // 3. ACTION LOGIC: Toggle Status (Press 'D')
-            else if (key.getKeyType() == KeyType.Character && key.getCharacter() == 'd') {
+                if (selectedIndex > 0) selectedIndex--;
+            } else if (key.getKeyType() == KeyType.Character && key.getCharacter() == 'n') {
+                if (currentMode == ViewMode.DELIVERIES) handleNewDeliveryInput(controller);
+                else handleNewDriverInput(controller);
+            } else if (key.getKeyType() == KeyType.Character && key.getCharacter() == 'x') {
+                if (currentMode == ViewMode.DELIVERIES) controller.removeDelivery(selectedIndex);
+                else controller.removeDriver(selectedIndex);
+                if (selectedIndex > 0) selectedIndex--;
+            } else if (key.getKeyType() == KeyType.Character && key.getCharacter() == 'd' && currentMode == ViewMode.DELIVERIES) {
                 List<Delivery> list = controller.getAllDeliveries();
                 if (!list.isEmpty()) {
                     Delivery selected = list.get(selectedIndex);
                     selected.setDelivered(!selected.isDelivered());
                 }
             }
-
-            // 4. NEW DELIVERY LOGIC (Press 'N')
-            else if (key.getKeyType() == KeyType.Character && key.getCharacter() == 'n') {
-                handleNewDeliveryInput(controller);
-            }
-
-            else if (key.getKeyType() == KeyType.Character && key.getCharacter() == 'x') {
-                List<Delivery> list = controller.getAllDeliveries();
-                if (!list.isEmpty()) {
-                    controller.removeDelivery(selectedIndex);
-
-                    // Security setting: if you delete the last line, the cursor moves up one position.
-                    if (selectedIndex >= controller.getAllDeliveries().size() && selectedIndex > 0) {
-                        selectedIndex--;
-                    }
-                }
-            }
         }
-
-        screen.stopScreen(); // Cleanup after the loop ends
+        screen.stopScreen();
     }
 
-    private void render(List<Delivery> deliveries) throws IOException {
+    private void render(LogisticsController controller) throws IOException {
         screen.clear();
+        String modeName = (currentMode == ViewMode.DELIVERIES) ? "DELIVERIES" : "DRIVERS";
+        drawText(5, 2, " === BIALYSTOK LOGISTICS [" + modeName + "] === ", TextColor.ANSI.WHITE, TextColor.ANSI.BLUE, true);
 
-        // Title and Legend
-        drawText(5, 2, " === BIALYSTOK SMART-LOGISTICS SYSTEM === ", TextColor.ANSI.WHITE, TextColor.ANSI.BLUE, true);
-        drawText(5, 3, " [N] Add | [D] Toggle Status | [X] Delete | [Q] Exit", TextColor.ANSI.CYAN, TextColor.ANSI.DEFAULT, false);
+        // Menu legend fixed
+        String menu = (currentMode == ViewMode.DELIVERIES)
+                ? " [M] Mode | [N] Add | [D] Toggle | [X] Delete | [Q] Exit"
+                : " [M] Mode | [N] Add | [X] Delete | [Q] Exit";
+        drawText(5, 3, menu, TextColor.ANSI.CYAN, TextColor.ANSI.DEFAULT, false);
 
-        // Table Header
+        if (currentMode == ViewMode.DELIVERIES) renderDeliveriesTable(controller.getAllDeliveries());
+        else renderDriversTable(controller.getAllDrivers());
+        screen.refresh();
+    }
+
+    private void renderDeliveriesTable(List<Delivery> list) throws IOException {
         drawText(5, 5, String.format("%-4s | %-25s | %-7s | %s", "ID", "DESTINATION", "WEIGHT", "STATUS"), TextColor.ANSI.YELLOW, TextColor.ANSI.DEFAULT, true);
-        drawText(5, 6, "------------------------------------------------------------", TextColor.ANSI.WHITE, TextColor.ANSI.DEFAULT, false);
-
-        // Data Rows
-        for (int i = 0; i < deliveries.size(); i++) {
-            Delivery d = deliveries.get(i);
-            boolean isSelected = (i == selectedIndex);
-
-            TextColor backColor = isSelected ? TextColor.ANSI.BLUE_BRIGHT : TextColor.ANSI.DEFAULT;
-            TextColor foreColor = isSelected ? TextColor.ANSI.BLACK : TextColor.ANSI.WHITE;
-            TextColor statusColor = d.isDelivered() ? TextColor.ANSI.GREEN : TextColor.ANSI.RED;
-
+        for (int i = 0; i < list.size(); i++) {
+            Delivery d = list.get(i);
+            boolean isSel = (i == selectedIndex);
+            TextColor back = isSel ? TextColor.ANSI.BLUE_BRIGHT : TextColor.ANSI.DEFAULT;
             String row = String.format("%-4d | %-25s | %-7.1f | ", d.getId(), d.getDestinationAddress(), d.getWeight());
-
-            drawText(5, 7 + i, row, foreColor, backColor, isSelected);
-            drawText(48, 7 + i, d.isDelivered() ? "DONE   " : "PENDING", statusColor, backColor, true);
+            drawText(5, 7 + i, row, isSel ? TextColor.ANSI.BLACK : TextColor.ANSI.WHITE, back, isSel);
+            drawText(48, 7 + i, d.isDelivered() ? "DONE" : "PENDING", d.isDelivered() ? TextColor.ANSI.GREEN : TextColor.ANSI.RED, back, true);
         }
-
-        screen.refresh();
     }
 
-    /**
-     * Handles the multi-step input: first address, then weight.
-     */
+    private void renderDriversTable(List<Driver> list) throws IOException {
+        drawText(5, 5, String.format("%-4s | %-25s | %-15s", "ID", "NAME", "VEHICLE"), TextColor.ANSI.YELLOW, TextColor.ANSI.DEFAULT, true);
+        for (int i = 0; i < list.size(); i++) {
+            Driver d = list.get(i);
+            boolean isSel = (i == selectedIndex);
+            // FIXED: Using getName() instead of getDestinationAddress()
+            String row = String.format("%-4d | %-25s | %-15s", d.getId(), d.getName(), d.getVehicle());
+            drawText(5, 7 + i, row, isSel ? TextColor.ANSI.BLACK : TextColor.ANSI.WHITE, isSel ? TextColor.ANSI.GREEN_BRIGHT : TextColor.ANSI.DEFAULT, isSel);
+        }
+    }
+
     private void handleNewDeliveryInput(LogisticsController controller) throws IOException {
-        String tempAddress = "";
-        String tempWeightStr = "";
-        int step = 1; // 1 = Address, 2 = Weight
-        boolean typing = true;
-
-        while (typing) {
-            // Render the current step
-            String label = (step == 1) ? "ENTER DESTINATION" : "ENTER WEIGHT (kg)";
-            String currentBuffer = (step == 1) ? tempAddress : tempWeightStr;
-            renderInputBox(label, currentBuffer);
-
-            KeyStroke key = screen.readInput();
-
-            if (key.getKeyType() == KeyType.Enter) {
-                if (step == 1) {
-                    // VALIDATION: Cannot be empty
-                    if (!tempAddress.trim().isEmpty()) {
-                        step = 2; // Move to weight
-                    }
-                } else if (step == 2) {
-                    // VALIDATION: Try to parse weight
-                    try {
-                        double weight = Double.parseDouble(tempWeightStr);
-                        controller.addDelivery(tempAddress, weight);
-                        typing = false; // Finished!
-                    } catch (NumberFormatException e) {
-                        tempWeightStr = ""; // Clear weight if it's not a number
-                    }
-                }
-            } else if (key.getKeyType() == KeyType.Backspace) {
-                if (step == 1 && tempAddress.length() > 0)
-                    tempAddress = tempAddress.substring(0, tempAddress.length() - 1);
-                else if (step == 2 && tempWeightStr.length() > 0)
-                    tempWeightStr = tempWeightStr.substring(0, tempWeightStr.length() - 1);
-            } else if (key.getKeyType() == KeyType.Character) {
-                if (step == 1) tempAddress += key.getCharacter();
-                else tempWeightStr += key.getCharacter();
-            } else if (key.getKeyType() == KeyType.Escape) {
-                typing = false; // Cancel everything
-            }
-
-            render(controller.getAllDeliveries()); // Keep table visible in background
-        }
+        String addr = genericInput("ENTER DESTINATION (ESC to cancel)");
+        if (addr == null || addr.isEmpty()) return;
+        String weightS = genericInput("ENTER WEIGHT (kg)");
+        if (weightS == null || weightS.isEmpty()) return;
+        try {
+            controller.addDelivery(addr, Double.parseDouble(weightS));
+        } catch (Exception e) {}
     }
 
-    /**
-     * Updated to show a dynamic label.
-     */
-    private void renderInputBox(String label, String buffer) throws IOException {
-        drawText(5, 18, label + ": " + buffer + "_", TextColor.ANSI.YELLOW, TextColor.ANSI.DEFAULT, true);
-        screen.refresh();
+    private void handleNewDriverInput(LogisticsController controller) throws IOException {
+        String name = genericInput("ENTER DRIVER NAME (ESC to cancel)");
+        if (name == null || name.isEmpty()) return;
+        String vehicle = genericInput("ENTER VEHICLE TYPE");
+        if (vehicle == null || vehicle.isEmpty()) return;
+        controller.addDriver(name, vehicle);
+    }
+
+    private String genericInput(String label) throws IOException {
+        String input = "";
+        while (true) {
+            // Clean the input line before drawing to prevent ghost text (Fix for Captura de ecrã 2026-05-02 132602.png)
+            drawText(5, 20, " ".repeat(80), TextColor.ANSI.DEFAULT, TextColor.ANSI.DEFAULT, false);
+            drawText(5, 20, label + ": " + input + "_", TextColor.ANSI.YELLOW, TextColor.ANSI.DEFAULT, true);
+            screen.refresh();
+
+            KeyStroke k = screen.readInput();
+            if (k.getKeyType() == KeyType.Enter) return input;
+            if (k.getKeyType() == KeyType.Escape) return null; // Allows canceling
+            if (k.getKeyType() == KeyType.Backspace && input.length() > 0) input = input.substring(0, input.length() - 1);
+            if (k.getKeyType() == KeyType.Character) input += k.getCharacter();
+        }
     }
 
     private void drawText(int col, int row, String text, TextColor fore, TextColor back, boolean bold) {
-        var graphics = screen.newTextGraphics().setForegroundColor(fore).setBackgroundColor(back);
-        if (bold) graphics.enableModifiers(SGR.BOLD);
-        graphics.putString(col, row, text);
+        var g = screen.newTextGraphics().setForegroundColor(fore).setBackgroundColor(back);
+        if (bold) g.enableModifiers(SGR.BOLD);
+        g.putString(col, row, text);
     }
 }

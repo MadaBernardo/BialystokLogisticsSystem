@@ -1,36 +1,33 @@
 package com.logistics.controller;
 
 import com.logistics.model.Delivery;
+import com.logistics.model.Driver;
 import java.util.ArrayList;
 import java.util.List;
 import java.io.*;
 import java.util.Scanner;
 
 /**
- * The Manager of our system.
- * It handles the "Database" (a List), persistent storage, and ID generation.
+ * The core logic manager. Handles data lists, ID generation, and CSV persistence.
  */
 public class LogisticsController {
 
     private List<Delivery> deliveries;
+    private List<Driver> drivers;
 
-    /** * Keeps track of the absolute next ID to be assigned.
-     * This prevents ID duplication even when items are deleted.
-     */
-    private int nextId = 1;
+    // Separate counters to ensure unique IDs for each category
+    private int nextDeliveryId = 1;
+    private int nextDriverId = 1;
 
     public LogisticsController() {
         this.deliveries = new ArrayList<>();
+        this.drivers = new ArrayList<>();
     }
 
-    /**
-     * Creates and adds a new delivery to the system.
-     * Uses a dedicated counter for IDs to ensure uniqueness.
-     */
+    // --- DELIVERY METHODS ---
+
     public void addDelivery(String address, double weight) {
-        // Use nextId and increment it immediately for the next call
-        Delivery d = new Delivery(nextId++, address, weight);
-        deliveries.add(d);
+        deliveries.add(new Delivery(nextDeliveryId++, address, weight));
     }
 
     public List<Delivery> getAllDeliveries() {
@@ -43,54 +40,90 @@ public class LogisticsController {
         }
     }
 
+    // --- DRIVER METHODS ---
+
+    public void addDriver(String name, String vehicle) {
+        drivers.add(new Driver(nextDriverId++, name, vehicle));
+    }
+
+    public List<Driver> getAllDrivers() {
+        return drivers;
+    }
+
+    public void removeDriver(int index) {
+        if (index >= 0 && index < drivers.size()) {
+            drivers.remove(index);
+        }
+    }
+
+    // --- PERSISTENCE (CSV) ---
+
     /**
-     * Saves all current deliveries to a CSV file.
+     * Saves both lists to their respective CSV files.
      */
-    public void saveToFile(String filename) {
-        try (PrintWriter writer = new PrintWriter(new FileWriter(filename))) {
+    public void saveAllData(String deliveryFile, String driverFile) {
+        // Save Deliveries
+        try (PrintWriter writer = new PrintWriter(new FileWriter(deliveryFile))) {
             for (Delivery d : deliveries) {
-                writer.println(d.getId() + ";" +
-                        d.getDestinationAddress() + ";" +
-                        d.getWeight() + ";" +
-                        d.isDelivered());
+                writer.println(d.getId() + ";" + d.getDestinationAddress() + ";" + d.getWeight() + ";" + d.isDelivered());
             }
         } catch (IOException e) {
-            System.err.println("Error saving to file: " + e.getMessage());
+            System.err.println("Error saving deliveries: " + e.getMessage());
+        }
+
+        // Save Drivers
+        try (PrintWriter writer = new PrintWriter(new FileWriter(driverFile))) {
+            for (Driver d : drivers) {
+                writer.println(d.getId() + ";" + d.getName() + ";" + d.getVehicle());
+            }
+        } catch (IOException e) {
+            System.err.println("Error saving drivers: " + e.getMessage());
         }
     }
 
     /**
-     * Loads deliveries from a CSV file.
-     * Also recovers the 'nextId' state based on the highest ID found.
+     * Loads both lists and restores the correct nextId state.
      */
-    public void loadFromFile(String filename) {
+    public void loadAllData(String deliveryFile, String driverFile) {
+        loadDeliveries(deliveryFile);
+        loadDrivers(driverFile);
+    }
+
+    private void loadDeliveries(String filename) {
         File file = new File(filename);
         if (!file.exists()) return;
-
-        int maxIdFound = 0; // Temporary variable to find the highest existing ID
-
-        try (Scanner scanner = new Scanner(file)) {
+        int maxId = 0;
+        try (Scanner sc = new Scanner(file)) {
             deliveries.clear();
-            while (scanner.hasNextLine()) {
-                String[] parts = scanner.nextLine().split(";");
-                if (parts.length == 4) {
-                    int id = Integer.parseInt(parts[0]);
-
-                    Delivery d = new Delivery(id, parts[1], Double.parseDouble(parts[2]));
-                    d.setDelivered(Boolean.parseBoolean(parts[3]));
+            while (sc.hasNextLine()) {
+                String[] p = sc.nextLine().split(";");
+                if (p.length == 4) {
+                    int id = Integer.parseInt(p[0]);
+                    Delivery d = new Delivery(id, p[1], Double.parseDouble(p[2]));
+                    d.setDelivered(Boolean.parseBoolean(p[3]));
                     deliveries.add(d);
-
-                    // Track the highest ID found in the file
-                    if (id > maxIdFound) {
-                        maxIdFound = id;
-                    }
+                    if (id > maxId) maxId = id;
                 }
             }
-            // Ensure the next new delivery starts after the highest existing ID
-            this.nextId = maxIdFound + 1;
+            this.nextDeliveryId = maxId + 1;
+        } catch (Exception e) { System.err.println("Load Error (Deliveries)"); }
+    }
 
-        } catch (FileNotFoundException e) {
-            // Standard practice: log error or handle silently if file is missing
-        }
+    private void loadDrivers(String filename) {
+        File file = new File(filename);
+        if (!file.exists()) return;
+        int maxId = 0;
+        try (Scanner sc = new Scanner(file)) {
+            drivers.clear();
+            while (sc.hasNextLine()) {
+                String[] p = sc.nextLine().split(";");
+                if (p.length == 3) {
+                    int id = Integer.parseInt(p[0]);
+                    drivers.add(new Driver(id, p[1], p[2]));
+                    if (id > maxId) maxId = id;
+                }
+            }
+            this.nextDriverId = maxId + 1;
+        } catch (Exception e) { System.err.println("Load Error (Drivers)"); }
     }
 }
